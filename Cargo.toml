@@ -1,0 +1,33 @@
+[package]
+name = "discord_music_player"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tracing = "^0.1"
+tracing-subscriber = "^0.3"
+tracing-futures = "^0.2"
+dotenv = "0.15.0"
+songbird = '^0.3.2'
+serde_json = "1.0.100"
+serde = "1.0.188"
+once_cell = "1.18.0"
+rand = "0.8.5"
+chrono = "0.4.31"
+uuid = "1.4.1"
+regex = "1.10.0"
+async-trait = "0.1.72"
+
+[dependencies.serenity]
+version = "^0.11.6"
+# features = ["client", "standard_framework", "voice", "rustls_backend", "utils", "builder", "chrono"]
+
+[dependencies.tokio]
+version = "^1.33"
+features = ["macros", "rt-multi-thread", "signal"]
+
+[dependencies.youtube_dl]
+version = "0.9.0"
+features = ["tokio"]
