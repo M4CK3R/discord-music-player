@@ -1,85 +1,157 @@
-use std::{sync::Arc, fmt::Display, error::Error, str::FromStr};
+use std::{str::FromStr, sync::Arc};
 
 use chrono::{Duration, Utc};
 use serenity::{
-    model::prelude::{ChannelId, Guild, Message},
-    prelude::{Context, TypeMap}, utils::Color, builder::CreateEmbed,
+    builder::CreateEmbed,
+    client::Context,
+    http::Http,
+    model::{channel::Message, guild::Guild, id::ChannelId, Color},
 };
-use songbird::Songbird;
+use songbird::{typemap::TypeMap, Songbird};
 use tokio::sync::RwLock;
 
-use crate::{audio_manager::AudioManager, queue_manager::{QueueManager, queue::LoopMode}};
-use crate::common::Song;
+use crate::{
+    commands::logger::messages::GETTING_QUEUE_MANAGER,
+    common::{DiscordAudioManager, DiscordQueueManager, Song},
+    queue_manager::LoopMode,
+};
 
-static PROGRESS_BAR_LENGTH: usize = 20;
-static PROGRESS_BAR_FILL: &str = "▮";
-static PROGRESS_BAR_EMPTY: &str = "▯";
+use super::logger::{
+    messages::{GETTING_CHANNEL, GETTING_GUILD, GETTING_QUEUE_MANAGER_MAP, GETTING_VOICE_MANAGER},
+    Logger,
+};
 
-pub(crate) fn get_audio_manager_lock(data: &TypeMap) -> Arc<RwLock<AudioManager>> {
-    data.get::<AudioManager>()
-        .expect("Expected AudioManager in TypeMap.")
-        .clone()
-}
+static _PROGRESS_BAR_LENGTH: usize = 20;
+static _PROGRESS_BAR_FILL: &str = "▮";
+static _PROGRESS_BAR_EMPTY: &str = "▯";
 
-pub(crate) fn get_queue_manager_lock(data: &TypeMap) -> Arc<RwLock<QueueManager>> {
-    data.get::<QueueManager>()
-        .expect("Expected QueueManager in TypeMap.")
-        .clone()
-}
-
-pub(crate) fn get_guild(ctx: &Context, msg: &Message) -> Option<Guild> {
+pub(crate) async fn get_guild(ctx: &Context, msg: &Message) -> Result<Guild, String> {
     msg.guild(&ctx.cache)
+        .ok_or("Guild not found".to_string())
+        .map(|g| g.to_owned()) // TODO: remove clone
+        .log_with_message(GETTING_GUILD, msg, &ctx.http)
+        .await
 }
 
-pub(crate) fn get_channel_id(guild: &Guild, msg: &Message) -> Option<ChannelId> {
+pub(crate) async fn get_channel_id(
+    guild: &Guild,
+    msg: &Message,
+    http: &Arc<Http>,
+) -> Result<ChannelId, String> {
     guild
         .voice_states
         .get(&msg.author.id)
         .and_then(|voice_state| voice_state.channel_id)
+        .ok_or("Channel not found".to_string())
+        .log_with_message(GETTING_CHANNEL, msg, http)
+        .await
 }
 
-pub(crate) async fn get_manager(ctx: &Context) -> Arc<Songbird> {
+pub(crate) async fn get_manager(ctx: &Context, msg: &Message) -> Result<Arc<Songbird>, String> {
     songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialisation.")
-        .clone()
+        .ok_or("Songbird not found".to_string())
+        .log_with_message(GETTING_VOICE_MANAGER, msg, &ctx.http)
+        .await
 }
 
-pub(crate) fn build_embed<S: ToString>(
-    title: S,
-    colour: Color,
-    fields: Vec<(String, String, bool)>,
-) -> CreateEmbed {
-    CreateEmbed::default()
-        .title(title)
-        .colour(colour)
-        .fields(fields)
-        .to_owned()
+pub(crate) async fn get_queue_manager(
+    guild_id: String,
+    data: &TypeMap,
+    msg: Option<&Message>,
+    http: Option<&Arc<Http>>,
+) -> Result<Arc<RwLock<DiscordQueueManager>>, String> {
+    let queue_manager_map = data
+        .get::<DiscordQueueManager>()
+        .ok_or("Queue manager not found".to_string())
+        .try_log_with_message(GETTING_QUEUE_MANAGER_MAP, msg, http)
+        .await?;
+    let queue_manager = queue_manager_map.read().await;
+    let result = queue_manager
+        .get(&guild_id)
+        .ok_or("Queue manager not found".to_string())
+        .try_log_with_message(GETTING_QUEUE_MANAGER, msg, http)
+        .await?
+        .clone();
+    Ok(result)
 }
 
-pub(crate) fn build_current_song_embed(song: Box<dyn Song>, duration_played: f32) -> CreateEmbed {
-    let song_duration = match song.duration(){
-        Some(n) => n as f32,
-        None => f32::MAX,
-    }; // TODO handle this differently
-    let timestamp = Utc::now() + Duration::seconds((song_duration - duration_played) as i64);
-    let fill_amount = (duration_played as f32 / song_duration as f32
-        * PROGRESS_BAR_LENGTH as f32)
+pub(crate) async fn get_audio_manager(
+    data: &TypeMap,
+    msg: Option<&Message>,
+    http: Option<&Arc<Http>>,
+) -> Result<Arc<RwLock<DiscordAudioManager>>, String> {
+    let audio_manager = data
+        .get::<DiscordAudioManager>()
+        .ok_or("Audio manager not found".to_string())
+        .try_log_with_message(GETTING_QUEUE_MANAGER, msg, http)
+        .await?;
+    Ok(audio_manager.to_owned())
+}
+
+impl FromStr for LoopMode {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_lowercase();
+        match s.as_str() {
+            "none" => Ok(LoopMode::None),
+            "song" => Ok(LoopMode::Song),
+            "queue" => Ok(LoopMode::Queue),
+            x => {
+                if let Ok(n) = x.parse() {
+                    return Ok(LoopMode::Repeat(n));
+                }
+                Err("Invalid loop mode")
+            }
+        }
+    }
+}
+
+fn get_progress_bar(
+    song_duration: i64,
+    duration_played: i64,
+    progress_bar_length: usize,
+    progress_bar_fill: &str,
+    progress_bar_empty: &str,
+) -> String {
+    let fill_amount = (duration_played as f32 / song_duration as f32 * progress_bar_length as f32)
         .round() as usize;
-    let progress_bar = format!(
+
+    format!(
         "[{}{}]",
-        PROGRESS_BAR_FILL.repeat(fill_amount),
-        PROGRESS_BAR_EMPTY.repeat(PROGRESS_BAR_LENGTH - fill_amount)
-    );
+        progress_bar_fill.repeat(fill_amount),
+        progress_bar_empty.repeat(progress_bar_length - fill_amount)
+    )
+}
+
+pub(crate) fn build_current_song_embed(
+    song: Box<dyn Song>,
+    duration_played: i64,
+    progress_bar_length: usize,
+    progress_bar_fill: &str,
+    progress_bar_empty: &str,
+) -> CreateEmbed {
+    let (overall_duration, timestamp, progress_bar) = match song.duration() {
+        Some(song_duration) => {
+            let song_duration_i = song_duration as i64;
+            let overall_duration = format_duration(&Duration::seconds(song_duration_i));
+            let timestamp = Utc::now() + Duration::seconds(song_duration_i - duration_played);
+            let progress_bar = get_progress_bar(
+                song_duration_i,
+                duration_played,
+                progress_bar_length,
+                progress_bar_fill,
+                progress_bar_empty,
+            );
+            (overall_duration, timestamp, progress_bar)
+        }
+        None => ("∞".to_string(), Utc::now(), "∞".to_string()),
+    };
 
     let duration = Duration::seconds(duration_played as i64);
-    let overall_duration = Duration::seconds(song_duration as i64);
 
-    let duration_formatted = format!(
-        "{}/{}",
-        format_duration(&duration),
-        format_duration(&overall_duration)
-    );
+    let duration_formatted = format!("{}/{}", format_duration(&duration), &overall_duration);
 
     return CreateEmbed::default()
         .title("Currently playing")
@@ -104,56 +176,4 @@ pub(crate) fn format_duration(d: &Duration) -> String {
         d.num_minutes() % 60,
         d.num_seconds() % 60
     )
-}
-
-#[derive(Debug)]
-pub(crate) struct CommandError{
-    msg: String,
-}
-
-impl Display for CommandError{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.msg)
-    }
-}
-
-impl Error for CommandError {
-    
-}
-
-impl From<String> for CommandError{
-    fn from(msg: String) -> Self {
-        CommandError{
-            msg,
-        }
-    }
-}
-
-impl From<&str> for CommandError{
-    fn from(msg: &str) -> Self {
-        CommandError{
-            msg: msg.to_string(),
-        }
-    }
-}
-
-
-
-impl FromStr for LoopMode {
-    type Err = &'static str;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.to_lowercase();
-        match s.as_str() {
-            "none" => Ok(LoopMode::None),
-            "song" => Ok(LoopMode::Song),
-            "queue" => Ok(LoopMode::Queue),
-            x => {
-                if let Ok(n) = x.parse() {
-                    return Ok(LoopMode::Repeat(n));
-                }
-                Err("Invalid loop mode")
-            }
-        }
-    }
 }

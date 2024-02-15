@@ -1,91 +1,89 @@
-use crate::common::Song;
+mod link_handler;
+mod songs;
 
-use self::cache_manager::{CacheManager, CachedSong};
+use std::sync::Arc;
 
-mod cache_manager;
-mod utils;
-mod yt_dl_wrapper;
+use tokio::sync::RwLock;
 
-pub struct AudioManager {
-    cache_manager: CacheManager,
+use crate::{
+    cache_manager::{cache_saver::CacheSaver, CacheManager},
+    common::{Song, SongId},
+};
+
+use self::link_handler::LinkHandling;
+
+pub use self::link_handler::StandardLinkHandler;
+pub struct AudioManager<CS, LH>
+where
+    CS: CacheSaver + Send + Sync,
+    LH: LinkHandling,
+{
+    pub cache_manager_instance: Arc<RwLock<CacheManager<CS>>>,
+    pub link_handler: LH,
 }
 
-impl AudioManager {
-    pub fn new() -> Self {
-        let audio_files_path = std::env::var("AUDIO_FILES_PATH").expect("AUDIO_FILES_PATH not set");
+impl<CS, LH> AudioManager<CS, LH>
+where
+    CS: CacheSaver + Send + Sync,
+    LH: LinkHandling,
+{
+    pub fn new(
+        cache_manager_instance: Arc<RwLock<CacheManager<CS>>>,
+        link_handler_instance: LH,
+    ) -> AudioManager<CS, LH> {
         AudioManager {
-            cache_manager: CacheManager::new(audio_files_path.into()),
+            cache_manager_instance,
+            link_handler: link_handler_instance,
         }
     }
 
-    pub async fn handle_link(&mut self, url: &str) -> Result<Vec<Box<dyn Song>>, String> {
-        if let Some(songs) = self.cache_manager.get(url) {
-            return Ok(songs.iter().map(|s| s.create()).collect());
-        }
-
-        if !utils::is_youtube_link(url) {
-            return Err("Not a youtube link".into());
-        }
-
-        self.handle_youtube_link(url).await
+    pub async fn _is_cached(&self, id: &SongId) -> bool {
+        let cache_manager_read = self.cache_manager_instance.read().await;
+        cache_manager_read.is_cached(id)
     }
 
-    pub fn load_songs(&self, queue: Vec<String>) -> Vec<Box<dyn Song>> {
-        let mut res = Vec::new();
-        for id in queue {
-            let songs = self.cache_manager.get(&id);
-            if songs.is_none() {
-                continue;
-            }
-            let songs = songs.unwrap();
-            for song in songs {
-                res.push(song.create());
+    pub async fn handle_link(&mut self, link: &String) -> Result<Vec<Box<dyn Song>>, String> {
+        if self._is_cached(link).await{
+            let cache_manager_read = self.cache_manager_instance.read().await;
+            let songs = cache_manager_read.get_song(link);
+            match songs {
+                Some(songs) => return Ok(songs.iter().map(|s| s.clone_song()).collect()),
+                None => (),
             }
         }
-        res
+        self.link_handler.handle_link(link).await
     }
 
-    async fn handle_youtube_link(&mut self, url: &str) -> Result<Vec<Box<dyn Song>>, String> {
-        let songs =
-            yt_dl_wrapper::download_audio_files(url, &self.cache_manager.get_yt_template()).await?;
+    pub async fn get_cached_songs(&self, ids: &Vec<SongId>) -> Vec<Box<dyn Song>> {
+        let cache_manager_read = self.cache_manager_instance.read().await;
+        ids.
+        iter()
+        .filter_map(|id| cache_manager_read.get_song(id))
+        .flatten()
+        .map(|s| s.clone_song())
+        .collect()
+    }
+}
 
-        let cached_songs = {
-            let mut cached_songs = Vec::new();
-            for sv in songs {
-                let ext = match sv.ext.clone() {
-                    Some(e) => e,
-                    None => continue,
-                };
-                let path = self.cache_manager.get_cached_song_path(&sv.id, &ext);
-                let artist = match &sv.artist {
-                    Some(a) => a.clone(),
-                    None => "Unknown".to_string(),
-                };
-                let duration_value = match sv.duration.clone() {
-                    Some(d) => d,
-                    None => continue,
-                };
-                let duration = match duration_value.as_u64() {
-                    Some(d) => d as u32,
-                    None => continue,
-                };
-                let url = match &sv.url {
-                    Some(u) => u.clone(),
-                    None => continue,
-                };
-                let title = match &sv.title {
-                    Some(t) => t.clone(),
-                    None => continue,
-                };
-                let cs = CachedSong::new(title, artist, duration, path.into(), url);
-                self.cache_manager.add(&cs.get_id(), vec![cs.clone()]);
-                cached_songs.push(cs);
-            }
-            cached_songs
-        };
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
 
-        let res: Vec<Box<dyn Song>> = cached_songs.iter().map(|s| s.create()).collect();
-        self.cache_manager.add(url, cached_songs);
-        Ok(res)
+    use tokio::sync::RwLock;
+
+    use crate::{
+        audio_manager::link_handler::NullLinkHandler,
+        cache_manager::{cache_saver::MemoryCacheSaver, CacheManager},
+    };
+
+    use super::AudioManager;
+
+    #[tokio::test]
+    async fn test_is_cached_false() {
+        let cache_manager = Arc::new(RwLock::new(CacheManager::new(MemoryCacheSaver::new())));
+
+        let audio_manager = AudioManager::new(cache_manager, NullLinkHandler {});
+        let id = "test".to_string();
+        assert_eq!(audio_manager._is_cached(&id).await, false);
     }
 }
