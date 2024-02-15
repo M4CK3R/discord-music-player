@@ -21,7 +21,7 @@ regex = "1.10.2"
 async-trait = "0.1.74"
 
 [dependencies.serenity]
-version = "^0.11.6"
+version = "^0.11.7"
 # features = ["client", "standard_framework", "voice", "rustls_backend", "utils", "builder", "chrono"]
 
 [dependencies.tokio]
