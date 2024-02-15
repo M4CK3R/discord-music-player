@@ -4,6 +4,6 @@ services:
     container_name: discord-music-player
     image: discord-music-player
     volumes:
-      - /media/music-bot:/audio
+      - ./audio:/audio
     environment:
-      - DISCORD_TOKEN=<token>
+      - DISCORD_CACHE_DIR=/audio

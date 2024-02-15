@@ -5,161 +5,100 @@ use serenity::{
     model::channel::Message,
     prelude::Context,
 };
+use tracing::{event, Level};
 
 use crate::{
     commands::{
-        logger::{
-            messages::{
-                GETTING_GUILD, PAUSING_SONG, PLAYING_SONG, RESUMING_SONG, SETTING_LOOP_MODE,
-                SKIPPING_SONG, STOPPING_SONG,
-            },
-            Logger,
-        },
+        logger::{messages::SETTING_LOOP_MODE, Logger},
         utils,
     },
-    queue_manager::queue::LoopMode,
+    queue_manager::LoopMode,
 };
 
 #[command]
 #[only_in(guilds)]
-pub async fn play(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild = utils::get_guild(ctx, msg)
-        .ok_or("Guild not found")
-        .log_with_message(GETTING_GUILD, msg, &ctx.http)
-        .await?;
-
-    let data = ctx.data.read().await;
-    let queue_manager = utils::get_queue_manager_lock(&data);
-    let mut queue_manager = queue_manager.write().await;
-
-    queue_manager
-        .play(guild.id)
-        .await
-        .log_with_message(PLAYING_SONG, msg, &ctx.http)
-        .await?;
-
-    msg.channel_id
-        .say(&ctx.http, "Playing song")
-        .await
-        .log_message()?;
-    Ok(())
-}
-
-#[command]
-#[only_in(guilds)]
-pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild = utils::get_guild(ctx, msg)
-        .ok_or("Guild not found")
-        .log_with_message(GETTING_GUILD, msg, &ctx.http)
-        .await?;
-
-    let data = ctx.data.read().await;
-    let queue_manager = utils::get_queue_manager_lock(&data);
-    let mut queue_manager = queue_manager.write().await;
-    queue_manager
-        .stop(guild.id)
-        .await
-        .log_with_message(STOPPING_SONG, msg, &ctx.http)
-        .await?;
-
-    msg.channel_id
-        .say(&ctx.http, "Stopped song")
-        .await
-        .log_message()?;
-    Ok(())
-}
-
-#[command]
-#[only_in(guilds)]
+#[description = "Pauses the current song"]
+#[aliases("p")]
 pub async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild = utils::get_guild(ctx, msg)
-        .ok_or("Guild not found")
-        .log_with_message(GETTING_GUILD, msg, &ctx.http)
-        .await?;
-
+    let guild = utils::get_guild(ctx, msg).await?;
     let data = ctx.data.read().await;
-    let queue_manager = utils::get_queue_manager_lock(&data);
-    let mut queue_manager = queue_manager.write().await;
-    queue_manager
-        .pause(guild.id)
-        .await
-        .log_with_message(PAUSING_SONG, msg, &ctx.http)
-        .await?;
-
-    msg.channel_id
-        .say(&ctx.http, "Paused song")
-        .await
-        .log_message()?;
+    let queue_manager = utils::get_queue_manager(guild.id.to_string(), &data, None, None).await?;
+    let queue_manager = queue_manager.write().await;
+    match queue_manager.pause().await {
+        Ok(_) => {
+            msg.reply(ctx, "Song paused").await.log_message()?;
+        }
+        Err(e) => {
+            event!(Level::ERROR, "Failed to pause song {}", e);
+            msg.reply(ctx, "No song is playing").await.log_message()?;
+        }
+    };
     Ok(())
 }
 
 #[command]
 #[only_in(guilds)]
+#[description = "Resumes the current song"]
+#[aliases("r")]
 pub async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild = utils::get_guild(ctx, msg)
-        .ok_or("Guild not found")
-        .log_with_message(GETTING_GUILD, msg, &ctx.http)
-        .await?;
-
+    let guild = utils::get_guild(ctx, msg).await?;
     let data = ctx.data.read().await;
-    let queue_manager = utils::get_queue_manager_lock(&data);
-    let mut queue_manager = queue_manager.write().await;
-    queue_manager
-        .resume(guild.id)
-        .await
-        .log_with_message(RESUMING_SONG, msg, &ctx.http)
-        .await?;
-
-    msg.channel_id
-        .say(&ctx.http, "Resumed song")
-        .await
-        .log_message()?;
+    let queue_manager = utils::get_queue_manager(guild.id.to_string(), &data, None, None).await?;
+    let queue_manager = queue_manager.write().await;
+    match queue_manager.resume().await {
+        Ok(_) => {
+            msg.reply(ctx, "Song resumed").await.log_message()?;
+        }
+        Err(e) => {
+            event!(Level::ERROR, "Failed to resume song {}", e);
+            msg.reply(ctx, "No song is paused").await.log_message()?;
+        }
+    }
     Ok(())
 }
 
 #[command]
 #[only_in(guilds)]
+#[description = "Skips the current song"]
+#[aliases("s")]
 pub async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild = utils::get_guild(ctx, msg)
-        .ok_or("Guild not found")
-        .log_with_message(GETTING_GUILD, msg, &ctx.http)
-        .await?;
-
+    let guild = utils::get_guild(ctx, msg).await?;
     let data = ctx.data.read().await;
-    let queue_manager = utils::get_queue_manager_lock(&data);
-    let mut queue_manager = queue_manager.write().await;
-    queue_manager
-        .skip(guild.id)
-        .await
-        .log_with_message(SKIPPING_SONG, msg, &ctx.http)
-        .await?;
-
-    msg.channel_id
-        .say(&ctx.http, "Skipped song")
-        .await
-        .log_message()?;
+    let queue_manager = utils::get_queue_manager(guild.id.to_string(), &data, None, None).await?;
+    queue_manager.write().await.skip().await;
+    msg.reply(ctx, "Song skipped").await.log_message()?;
     Ok(())
 }
 
 #[command("loop")]
+#[description = "Sets the loop mode"]
+#[usage = "<mode>"]
+#[example = "none"]
+#[example = "song"]
+#[example = "queue"]
+#[example = "5 <-- Repeat the song 5 times"]
 pub async fn set_loop(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild = utils::get_guild(ctx, msg)
-        .ok_or("Guild not found")
-        .log_with_message(GETTING_GUILD, msg, &ctx.http)
-        .await?;
-
-    let loop_mode_string = args.single::<String>().unwrap();
+    let loop_mode_string = match args.single::<String>() {
+        Ok(loop_mode_string) => loop_mode_string,
+        Err(_) => {
+            msg.reply(ctx, "You need to specify a loop mode")
+                .await
+                .log_message()?;
+            return Ok(());
+        }
+    };
     let loop_mode = LoopMode::from_str(&loop_mode_string)
         .log_with_message(SETTING_LOOP_MODE, msg, &ctx.http)
         .await?;
-
+    let guild = utils::get_guild(ctx, msg).await?;
     let data = ctx.data.read().await;
-    let queue_manager = utils::get_queue_manager_lock(&data);
-    let mut queue_manager = queue_manager.write().await;
-    queue_manager.set_loop(guild.id, loop_mode).await;
-
-    msg.channel_id
-        .say(&ctx.http, format!("Loop mode set to {}", loop_mode_string))
+    let queue_manager = utils::get_queue_manager(guild.id.to_string(), &data, None, None).await?;
+    queue_manager
+        .write()
+        .await
+        .set_loop(loop_mode.clone())
+        .await;
+    msg.reply(ctx, format!("Loop mode set to {}", loop_mode))
         .await
         .log_message()?;
     Ok(())
