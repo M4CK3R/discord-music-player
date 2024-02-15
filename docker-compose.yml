@@ -2,8 +2,9 @@ version: '3'
 services:
   app:
     container_name: discord-music-player
-    image: discord-music-player
+    image: ghcr.io/m4ck3r/discord-music-player
     volumes:
-      - ./audio:/audio
+      - ./audio:/audio # same as DISCORD_CACHE_DIR
     environment:
-      - DISCORD_CACHE_DIR=/audio
+    #  - DISCORD_CACHE_DIR=/audio #(optional, default: /audio)
+      - DISCORD_TOKEN=YOUR_DISCORD_BOT_TOKEN
