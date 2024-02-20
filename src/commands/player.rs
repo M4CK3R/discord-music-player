@@ -60,7 +60,7 @@ pub async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 #[description = "Skips the current song"]
-#[aliases("s")]
+#[aliases("sk")]
 pub async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
     let guild = utils::get_guild(ctx, msg).await?;
     let data = ctx.data.read().await;
