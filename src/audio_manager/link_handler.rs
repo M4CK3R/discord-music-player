@@ -7,7 +7,7 @@ use reqwest::Client;
 use tokio::sync::RwLock;
 
 use crate::{
-    cache_manager::{cache_saver::CacheSaver, CacheManager},
+    cache_manager::{cache_saver::CacheSaver, CacheManager, CachedEntity},
     common::Song,
 };
 
@@ -25,12 +25,12 @@ where
     path: PathBuf,
     yt_template: String,
     cache_manager: Arc<RwLock<CacheManager<CS>>>,
-    client: Client
+    client: Client,
 }
 
 impl<CS> StandardLinkHandler<CS>
 where
-    CS: CacheSaver,
+    CS: CacheSaver + Send + Sync + Clone + 'static,
 {
     pub fn new(
         // audio_files_path: impl Into<PathBuf>,
@@ -42,7 +42,7 @@ where
             path: p,
             yt_template: format!("{}/%(id)s.%(ext)s", path.to_string()),
             cache_manager: cache_manager,
-            client: Client::new()
+            client: Client::new(),
         }
     }
     fn is_yt_link(link: &str) -> bool {
@@ -50,22 +50,56 @@ where
             .expect("Pattern was invalid")
             .is_match(link)
     }
+    async fn parse_cached_entity(&self, entity: &CachedEntity) -> Vec<Box<dyn Song>> {
+        match entity {
+            CachedEntity::Song(song) => vec![song.clone_song()],
+            CachedEntity::Playlist(songs) => {
+                let mut res = vec![];
+                for song in songs {
+                    let s = self.parse_song_link(&song).await;
+                    if let Ok(s) = s {
+                        res.push(s);
+                    }
+                }
+                res
+            }
+        }
+    }
+    async fn parse_song_link(&self, link: &str) -> Result<Box<dyn Song>, String> {
+        if let Some(CachedEntity::Song(cached_song)) =
+            self.cache_manager.read().await.get_song(link)
+        {
+            return Ok(cached_song.clone_song());
+        }
+        let mut songs = self.handle_link(link).await?;
+        if songs.is_empty() {
+            return Err("Could not get song".to_string());
+        }
+        let song = songs.pop();
+        song.ok_or("No song found".to_string())
+    }
 }
 
 #[async_trait]
 impl<CS> LinkHandling for StandardLinkHandler<CS>
 where
-    CS: CacheSaver + Send + Sync + 'static,
+    CS: CacheSaver + Send + Sync + Clone + 'static,
 {
     async fn handle_link(&self, link: &str) -> Result<Vec<Box<dyn Song>>, String> {
         if !Self::is_yt_link(link) {
             return Err("Link not supported".to_string());
         }
-        let songs = YtSong::new(link, self.client.clone()).await;
+        if let Some(cached_entity) = self.cache_manager.read().await.get_song(link) {
+            return Ok(self.parse_cached_entity(cached_entity).await);
+        }
+        let songs = YtSong::new(link, self.client.clone(), self.cache_manager.clone()).await;
         if songs.is_empty() {
-            return Err("Could not get song".to_string());
+            return Err(format!("Could not get song {}", link));
         }
         for song in &songs {
+            if let Some(cached_entity) = self.cache_manager.read().await.get_song(&song.get_id()) {
+                return Ok(self.parse_cached_entity(cached_entity).await);
+            }
             let _handle = tokio::task::spawn(cache_song_and_save(
                 song.clone(),
                 self.yt_template.clone(),
@@ -78,12 +112,12 @@ where
 }
 
 async fn cache_song_and_save<CS>(
-    song: YtSong,
+    song: YtSong<CS>,
     yt_template: String,
     path: PathBuf,
     cache_manager: Arc<RwLock<CacheManager<CS>>>,
 ) where
-    CS: CacheSaver + Send + Sync,
+    CS: CacheSaver + Send + Sync + Clone,
 {
     let cached_song = song.cache_song(yt_template.clone(), path.clone()).await;
     let cached_song = match cached_song {
@@ -104,11 +138,17 @@ async fn test_cache_song_and_save() {
     let cache_manager = Arc::new(RwLock::new(CacheManager::new(
         crate::cache_manager::cache_saver::MemoryCacheSaver::new(),
     )));
-    let song = YtSong::create("test_id", "test_title", "test_artist", Some(0));
+    let song = YtSong::create(
+        "test_id",
+        "test_title",
+        "test_artist",
+        Some(0),
+        cache_manager.clone(),
+    );
     let tmp = temp_dir();
     let yt_template = format!("{}/%(id)s.%(ext)s", tmp.to_str().unwrap());
     cache_song_and_save(song, yt_template, tmp, cache_manager.clone()).await;
-    assert!(cache_manager.read().await.is_cached(&"test_id".to_string()));
+    assert!(cache_manager.read().await._is_cached(&"test_id".to_string()));
 }
 
 pub struct NullLinkHandler {}

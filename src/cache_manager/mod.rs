@@ -51,35 +51,13 @@ where
             event!(Level::ERROR, "Failed to save cache: {:?}", e);
         }
     }
-    pub fn get_song(&self, id: &str) -> Option<Vec<&CachedSong>> {
+    pub fn get_song(&self, id: &str) -> Option<&CachedEntity> {
         let id = id.to_string();
-        match self.cache.get(&id) {
-            Some(CachedEntity::Song(song)) => Some(vec![song]),
-            Some(CachedEntity::Playlist(songs)) => Some(
-                songs
-                    .iter()
-                    .map(|s| self.get_song(s))
-                    .filter_map(|s| s)
-                    .flatten()
-                    .collect(),
-            ),
-            None => None,
-        }
+        self.cache.get(&id)
     }
-    pub fn _add_songs(&mut self, song_id: SongId, mut songs: Vec<impl CashableSong>) {
-        if songs.len() == 1 {
-            let song = match songs.pop() {
-                Some(song) => song,
-                None => return,
-            };
-            self.add_song(song.into());
-        } else {
-            let p = CachedEntity::Playlist(songs.iter().map(|s| s.get_id().clone()).collect());
-            self.cache.insert(song_id, p);
-            for song in songs {
-                self.add_song(song.into());
-            }
-        };
+    pub fn add_songs(&mut self, song_id: SongId, songs: Vec<SongId>) {
+        let p = CachedEntity::Playlist(songs);
+        self.cache.insert(song_id, p);
     }
     pub fn add_song(&mut self, song: impl CashableSong) {
         self.cache
@@ -107,7 +85,7 @@ where
         }
         res
     }
-    pub fn is_cached(&self, id: &SongId) -> bool {
+    pub fn _is_cached(&self, id: &SongId) -> bool {
         self.cache.contains_key(id)
     }
 }
@@ -122,7 +100,7 @@ mod tests {
     use async_trait::async_trait;
 
     use crate::{
-        cache_manager::cache_saver::{FileCacheSaver, MemoryCacheSaver},
+        cache_manager::{cache_saver::{FileCacheSaver, MemoryCacheSaver}, CachedEntity},
         common::{Song, SongId},
     };
 
@@ -212,12 +190,18 @@ mod tests {
         let cached_song1 = cache_manager
             .get_song(&"song1".to_string())
             .expect("Song 1 not cached");
-        assert_eq!(cached_song1[0].get_id(), song1.get_id());
+        let CachedEntity::Song(cached_song1) = cached_song1 else {
+            panic!("Song 1 not properly cached");
+        };
+        assert_eq!(cached_song1.get_id(), song1.get_id());
 
         let cached_song2 = cache_manager
             .get_song(&"song2".to_string())
             .expect("Song 2 not cached");
-        assert_eq!(cached_song2[0].get_id(), song2.get_id());
+        let CachedEntity::Song(cached_song2) = cached_song2 else {
+            panic!("Song 2 not properly cached");
+        };
+        assert_eq!(cached_song2.get_id(), song2.get_id());
     }
 
     #[test]
@@ -241,10 +225,16 @@ mod tests {
         cache_manager.add_song(song2.clone());
 
         let cached_song1 = cache_manager.get_song("song1").expect("Song 1 not cached");
-        assert_eq!(cached_song1[0].get_id(), song1.get_id());
+        let CachedEntity::Song(cached_song1) = cached_song1 else {
+            panic!("Song 1 not properly cached");
+        };
+        assert_eq!(cached_song1.get_id(), song1.get_id());
 
         let cached_song2 = cache_manager.get_song("song2").expect("Song 2 not cached");
-        assert_eq!(cached_song2[0].get_id(), song2.get_id());
+        let CachedEntity::Song(cached_song2) = cached_song2 else {
+            panic!("Song 2 not properly cached");
+        };
+        assert_eq!(cached_song2.get_id(), song2.get_id());
 
         cache_manager._remove_song("song1");
 
@@ -252,7 +242,10 @@ mod tests {
         assert!(cached_song1.is_none());
 
         let cached_song2 = cache_manager.get_song("song2").expect("Song 2 not cached");
-        assert_eq!(cached_song2[0].get_id(), song2.get_id());
+        let CachedEntity::Song(cached_song2) = cached_song2 else {
+            panic!("Song 2 not properly cached");
+        };
+        assert_eq!(cached_song2.get_id(), song2.get_id());
     }
 
     #[test]
@@ -276,10 +269,16 @@ mod tests {
         cache_manager.add_song(song2.clone());
 
         let cached_song1 = cache_manager.get_song("song1").expect("Song 1 not cached");
-        assert_eq!(cached_song1[0].get_id(), song1.get_id());
+        let CachedEntity::Song(cached_song1) = cached_song1 else {
+            panic!("Song 1 not properly cached");
+        };
+        assert_eq!(cached_song1.get_id(), song1.get_id());
 
         let cached_song2 = cache_manager.get_song("song2").expect("Song 2 not cached");
-        assert_eq!(cached_song2[0].get_id(), song2.get_id());
+        let CachedEntity::Song(cached_song2) = cached_song2 else {
+            panic!("Song 2 not properly cached");
+        };
+        assert_eq!(cached_song2.get_id(), song2.get_id());
 
         cache_manager._clear_cache();
 

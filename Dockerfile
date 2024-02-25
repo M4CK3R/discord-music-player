@@ -7,11 +7,22 @@ RUN apt-get update -y
 RUN apt-get upgrade -y
 RUN apt-get install -y cmake 
 
+RUN cargo build --release
+# RUN cp -R /build/target/release /app
+
+FROM rust:slim as final
+
+# INSTALL DEPENDENCIES
+
+RUN apt-get update -y
+RUN apt-get upgrade -y
+RUN apt-get install -y curl python3 ffmpeg
+
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /bin/yt-dlp
 RUN chmod a+rx /bin/yt-dlp 
 
-RUN cargo build --release
-RUN cp -R /build/target/release /app
+# COPY BINARY
+COPY --from=base /build/target/release /app
 
 # ENVIRONMENT VARIABLES
 WORKDIR /app
@@ -20,6 +31,6 @@ ENV RUST_BACKTRACE=1
 ENV DISCORD_CACHE_DIR=/audio
 
 # VOLUME
-VOLUME /audio
+VOLUME ${DISCORD_CACHE_DIR}
 
 CMD ["./discord_music_player"]

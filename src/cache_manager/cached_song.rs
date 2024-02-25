@@ -43,6 +43,7 @@ impl Song for CachedSong {
 
     async fn get_input(&self) -> Input {
         let p = self.path.clone();
+        tracing::info!("Getting cached input for {} with path: {:?}", self.id, p);
         let r = songbird::input::File::new(p);
         r.into()
     }

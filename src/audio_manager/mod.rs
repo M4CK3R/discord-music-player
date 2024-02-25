@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::{
-    cache_manager::{cache_saver::CacheSaver, CacheManager},
+    cache_manager::{cache_saver::CacheSaver, CacheManager, CachedEntity},
     common::{Song, SongId},
 };
 
@@ -39,29 +39,31 @@ where
 
     pub async fn _is_cached(&self, id: &SongId) -> bool {
         let cache_manager_read = self.cache_manager_instance.read().await;
-        cache_manager_read.is_cached(id)
+        cache_manager_read._is_cached(id)
     }
 
     pub async fn handle_link(&mut self, link: &String) -> Result<Vec<Box<dyn Song>>, String> {
-        if self._is_cached(link).await{
-            let cache_manager_read = self.cache_manager_instance.read().await;
-            let songs = cache_manager_read.get_song(link);
-            match songs {
-                Some(songs) => return Ok(songs.iter().map(|s| s.clone_song()).collect()),
-                None => (),
-            }
+        let songs = self.link_handler.handle_link(link).await;
+        if let Ok(songs) = &songs {
+            self.cache_manager_instance.write().await.add_songs(
+                link.clone(),
+                songs.iter().map(|s| s.get_id().clone()).collect(),
+            );
         }
-        self.link_handler.handle_link(link).await
+        songs
     }
 
     pub async fn get_cached_songs(&self, ids: &Vec<SongId>) -> Vec<Box<dyn Song>> {
         let cache_manager_read = self.cache_manager_instance.read().await;
-        ids.
-        iter()
-        .filter_map(|id| cache_manager_read.get_song(id))
-        .flatten()
-        .map(|s| s.clone_song())
-        .collect()
+        ids.iter()
+            .filter_map(|id| {
+                let s = cache_manager_read.get_song(id);
+                match s {
+                    Some(CachedEntity::Song(s)) => Some(s.clone_song()),
+                    _ => None,
+                }
+            })
+            .collect()
     }
 }
 

@@ -9,7 +9,7 @@ use crate::common::SongId;
 
 use super::CachedEntity;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CacheSaverError {
     FailedToCreateFile,
     FailedToParseData,
@@ -21,6 +21,7 @@ pub trait CacheSaver {
     fn load_cache(&self) -> Result<HashMap<SongId, CachedEntity>, CacheSaverError>;
 }
 
+#[derive(Debug, Clone)]
 pub struct FileCacheSaver {
     cache_dir: PathBuf,
 }
@@ -61,6 +62,7 @@ impl CacheSaver for FileCacheSaver {
     }
 }
 
+#[derive(Clone)]
 pub struct MemoryCacheSaver {
     pub cache: HashMap<SongId, CachedEntity>,
 }
