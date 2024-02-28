@@ -2133,9 +2133,9 @@ dependencies = [
 
 [[package]]
 name = "symphonia-format-wav"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da76614728fa27c003bdcdfbac51396bd8fcbf94c95fe8e62f1d2bac58ef03a4"
+checksum = "9cf0f6fa9a5e82310e7c1b34f9597fb747f1b4436740574845b5fafe021b12ff"
 dependencies = [
  "log",
  "symphonia-core",
