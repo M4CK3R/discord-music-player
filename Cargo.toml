@@ -23,6 +23,6 @@ tokio = { version = "^1.36", features = [
     "tracing",
 ] }
 youtube_dl = { version = "^0.9", features = ["tokio"] }
-songbird = { version = "^0.4.0", features = ["serenity", "driver"] }
+songbird = { version = "^0.4.1", features = ["serenity", "driver"] }
 symphonia = { version = "^0.5", features = ["all"] }
 reqwest = "^0.11"
