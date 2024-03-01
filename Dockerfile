@@ -1,4 +1,4 @@
-FROM rust as base
+FROM rust:bookworm as base
 WORKDIR /build
 COPY Cargo* ./
 COPY src ./src
@@ -8,9 +8,8 @@ RUN apt-get upgrade -y
 RUN apt-get install -y cmake 
 
 RUN cargo build --release
-# RUN cp -R /build/target/release /app
 
-FROM rust:slim as final
+FROM debian:bookworm-slim as final
 
 # INSTALL DEPENDENCIES
 
