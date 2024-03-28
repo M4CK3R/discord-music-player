@@ -165,7 +165,7 @@ async fn test_cache_song_and_save() {
     );
     let tmp = temp_dir();
     let yt_template = format!("{}/%(id)s.%(ext)s", tmp.to_str().unwrap());
-    cache_song_and_save(song, yt_template, PathBuf::from(tmp), cache_manager.clone()).await.unwrap();
+    cache_song_and_save(song, yt_template, tmp, cache_manager.clone()).await.unwrap();
     assert!(cache_manager
         .read()
         .await
