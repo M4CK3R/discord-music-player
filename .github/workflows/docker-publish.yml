@@ -34,7 +34,7 @@ jobs:
       - name: Cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.CARGO_HOME }}
+          path: ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cache-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install dependencies
