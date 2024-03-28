@@ -138,18 +138,14 @@ async fn cache_song_and_save<CS>(
     yt_template: String,
     path: PathBuf,
     cache_manager: Arc<RwLock<CacheManager<CS>>>,
-) where
+) -> Result<(), String>
+where
     CS: CacheSaver + Send + Sync + Clone,
 {
-    let cached_song = song.cache_song(yt_template.clone(), path.clone()).await;
-    let cached_song = match cached_song {
-        Ok(s) => s,
-        Err(_e) => {
-            return;
-        }
-    };
+    let cached_song = song.cache_song(yt_template.clone(), path.clone()).await?;
     let mut cache_manager = cache_manager.write().await;
     cache_manager.add_song(cached_song);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -169,7 +165,7 @@ async fn test_cache_song_and_save() {
     );
     let tmp = temp_dir();
     let yt_template = format!("{}/%(id)s.%(ext)s", tmp.to_str().unwrap());
-    cache_song_and_save(song, yt_template, tmp, cache_manager.clone()).await;
+    cache_song_and_save(song, yt_template, PathBuf::from(tmp), cache_manager.clone()).await.unwrap();
     assert!(cache_manager
         .read()
         .await
