@@ -18,7 +18,7 @@ env:
   # github.repository as <account>/<repo>
   IMAGE_NAME: ${{ github.repository }}
   RUST_BACKTRACE: 1
-  CARGO_HOME: /cargo
+  CARGO_HOME: $HOME/cargo
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main'}}
