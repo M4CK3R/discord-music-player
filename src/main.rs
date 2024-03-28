@@ -3,20 +3,16 @@ mod cache_manager;
 mod commands;
 mod common;
 mod event_handler;
-mod groups;
 mod queue_manager;
 
 use audio_manager::StandardLinkHandler;
 
 use common::{DiscordAudioManager, DiscordQueueManager};
 use dotenv::dotenv;
+use poise::PrefixFrameworkOptions;
 use tracing::event;
 
-use std::{
-    collections::{HashMap, HashSet},
-    env,
-    sync::Arc,
-};
+use std::{collections::HashMap, env, sync::Arc};
 use tokio::{
     signal::unix::{signal, SignalKind},
     sync::RwLock,
@@ -24,102 +20,12 @@ use tokio::{
 
 use songbird::SerenityInit;
 
-use serenity::{
-    builder::CreateMessage,
-    client::{Client, Context},
-    framework::{
-        standard::{
-            help_commands, macros::help, Args, CommandGroup, CommandResult, Configuration,
-            HelpOptions,
-        },
-        StandardFramework,
-    },
-    model::{channel::Message, id::UserId, Color},
-    prelude::{GatewayIntents, TypeMapKey},
-};
+use serenity::{client::Client, prelude::GatewayIntents};
 
 use crate::{
-    common::{DiscordCacheManager, DiscordCacheSaver},
+    common::{CommandError, Config, Data, DiscordCacheManager, DiscordCacheSaver},
     event_handler::Handler,
-    groups::{CACHE_GROUP, GENERAL_GROUP, PLAYER_GROUP, QUEUE_GROUP},
 };
-
-impl TypeMapKey for DiscordQueueManager {
-    type Value = Arc<RwLock<HashMap<String, Arc<RwLock<DiscordQueueManager>>>>>;
-}
-impl TypeMapKey for DiscordAudioManager {
-    type Value = Arc<RwLock<DiscordAudioManager>>;
-}
-// pub type DiscordCacheManager = CacheManager<DiscordCacheSaver>;
-impl TypeMapKey for DiscordCacheManager {
-    type Value = Arc<RwLock<DiscordCacheManager>>;
-}
-
-struct Config {
-    _prefix: String,
-    _token: String,
-    _cache_dir: String,
-    _saved_queues_path: String,
-}
-
-impl TypeMapKey for Config {
-    type Value = Config;
-}
-
-fn help_embed(title: &str, fields: &[(&[&str], &str)]) -> serenity::builder::CreateEmbed {
-    let flds = fields.iter().map(|&(names, desc)| {
-        let primary_name = names.first().unwrap();
-        let aliases = names.iter().skip(1).map(|n| *n).collect::<Vec<_>>();
-        let title = if aliases.is_empty() {
-            format!("{}", primary_name)
-        } else {
-            format!("{} ({})", primary_name, aliases.join(", "))
-        };
-        (title, desc, true)
-    });
-    let embed = serenity::builder::CreateEmbed::default()
-        .title(title)
-        .fields(flds)
-        .color(Color::DARK_GREEN);
-    embed
-}
-
-#[help("help", "h", "?", "co", "nani")]
-async fn my_help(
-    context: &Context,
-    msg: &Message,
-    args: Args,
-    help_options: &'static HelpOptions,
-    groups: &[&'static CommandGroup],
-    owners: HashSet<UserId>,
-) -> CommandResult {
-    if !args.is_empty() {
-        let _ = help_commands::with_embeds(context, msg, args, help_options, groups, owners).await;
-        return Ok(());
-    }
-    let g = groups
-        .iter()
-        .map(|g| {
-            (
-                g.name,
-                g.options
-                    .commands
-                    .iter()
-                    .map(|c| (c.options.names, c.options.desc.unwrap_or("")))
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let embeds = g
-        .iter()
-        .map(|(group, commands)| help_embed(&group, commands))
-        .collect::<Vec<_>>();
-    let _ = msg
-        .channel_id
-        .send_message(&context.http, CreateMessage::new().add_embeds(embeds))
-        .await;
-    Ok(())
-}
 
 #[tokio::main]
 async fn main() {
@@ -131,14 +37,48 @@ async fn main() {
     let prefix = env::var("DISCORD_PREFIX").unwrap_or_else(|_e| "!".to_string());
     let cache_dir = env::var("DISCORD_CACHE_DIR").unwrap_or_else(|_e| "./cache".to_string());
 
-    let framework = StandardFramework::new()
-        .help(&MY_HELP)
-        .unrecognised_command(commands::bot::unrecognised_command)
-        .group(&GENERAL_GROUP)
-        .group(&CACHE_GROUP)
-        .group(&PLAYER_GROUP)
-        .group(&QUEUE_GROUP);
-    framework.configure(Configuration::new().prefix(&prefix));
+    let framework: poise::Framework<Data, CommandError> = poise::Framework::builder()
+        .options(poise::FrameworkOptions {
+            commands: vec![
+                commands::ping(),
+                commands::join(),
+                commands::leave(),
+                commands::pause(),
+                commands::resume(),
+                commands::skip(),
+                commands::set_loop(),
+                commands::shuffle(),
+                commands::show(),
+                commands::queue(),
+                commands::add(),
+                commands::remove(),
+                commands::clear(),
+                commands::move_song(),
+                commands::save(),
+                commands::saved(),
+                commands::load(),
+                commands::remove_saved(),
+                commands::help(),
+            ],
+            prefix_options: PrefixFrameworkOptions {
+                prefix: Some(prefix.clone()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .setup(|ctx, _ready, framework| {
+            Box::pin(async move {
+                poise::builtins::register_globally(ctx, &framework.options().commands)
+                    .await
+                    .map_err(|e| CommandError::SerenityError(e))?;
+                let create_commands =
+                    poise::builtins::create_application_commands(&framework.options().commands);
+
+                serenity::all::Command::set_global_commands(ctx, create_commands).await?;
+                Ok(Data {})
+            })
+        })
+        .build();
 
     let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
 
@@ -152,23 +92,24 @@ async fn main() {
     {
         let mut data = client.data.write().await;
         data.insert::<Config>(Config {
-            _prefix: prefix.clone(),
-            _token: token.clone(),
-            _cache_dir: cache_dir.clone(),
-            _saved_queues_path: format!("{}/saved_queues.json", cache_dir),
+            prefix: prefix.clone(),
+            token: token.clone(),
+            cache_dir: cache_dir.clone(),
+            saved_queues_path: cache_dir.clone(),
         });
         data.insert::<DiscordQueueManager>(Arc::new(RwLock::new(HashMap::new())));
         let mut cache_manager = DiscordCacheManager::new(DiscordCacheSaver::new(cache_dir.clone()));
         cache_manager.load_cache();
         let arc_cache_manager = Arc::new(RwLock::new(cache_manager));
+        data.insert::<DiscordCacheManager>(arc_cache_manager.clone());
         data.insert::<DiscordAudioManager>(Arc::new(RwLock::new(DiscordAudioManager::new(
             arc_cache_manager.clone(),
             StandardLinkHandler::new(cache_dir, arc_cache_manager.clone()),
         ))));
-        data.insert::<DiscordCacheManager>(arc_cache_manager.clone());
     }
     let data = client.data.clone();
     tokio::spawn(async move {
+        event!(tracing::Level::INFO, "Starting client");
         let _ = client
             .start()
             .await
@@ -190,6 +131,7 @@ async fn main() {
         let cache_manager = data
             .get::<DiscordCacheManager>()
             .expect("Cache manager not found");
+        event!(tracing::Level::INFO, "Saving cache");
         let mut cache_manager = cache_manager.write().await;
         cache_manager.save_cache();
     }
@@ -197,8 +139,10 @@ async fn main() {
         let queue_managers = data
             .get::<DiscordQueueManager>()
             .expect("Queue manager not found");
+        event!(tracing::Level::INFO, "Saving queues");
         let queue_managers = queue_managers.read().await;
-        for (_, queue_manager) in queue_managers.iter() {
+        for (guild_id, queue_manager) in queue_managers.iter() {
+            event!(tracing::Level::INFO, "Saving queue for guild {}", guild_id);
             let queue_manager = queue_manager.read().await;
             queue_manager.save_queues();
         }

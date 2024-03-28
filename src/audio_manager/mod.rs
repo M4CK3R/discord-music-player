@@ -44,16 +44,16 @@ where
 
     pub async fn handle_link(&mut self, link: &String) -> Result<Vec<Box<dyn Song>>, String> {
         let songs = self.link_handler.handle_link(link).await;
-        if let Ok(songs) = &songs {
-            self.cache_manager_instance.write().await.add_songs(
-                link.clone(),
-                songs.iter().map(|s| s.get_id().clone()).collect(),
-            );
-        }
+        // if let Ok(songs) = &songs {
+        //     // self.cache_manager_instance.write().await.add_songs(
+        //     //     link.clone(),
+        //     //     songs.iter().map(|s| s.get_id().clone()).collect(),
+        //     // );
+        // }
         songs
     }
 
-    pub async fn get_cached_songs(&self, ids: &Vec<SongId>) -> Vec<Box<dyn Song>> {
+    pub async fn _get_cached_songs(&self, ids: &Vec<SongId>) -> Vec<Box<dyn Song>> {
         let cache_manager_read = self.cache_manager_instance.read().await;
         ids.iter()
             .filter_map(|id| {

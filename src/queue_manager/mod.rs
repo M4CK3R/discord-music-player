@@ -34,12 +34,19 @@ where
     QS: QueueSaver + Send + Sync,
 {
     pub fn new(queue_saver: QS) -> QueueManager<QS> {
-        QueueManager {
+        let mut qm = QueueManager {
             queue: Arc::new(RwLock::new(VecDeque::new())),
             saved_queues: HashMap::new(),
             player: Arc::new(RwLock::new(Player::new())),
             queue_saver,
+        };
+        match qm.queue_saver.load_queues() {
+            Ok(queues) => qm.saved_queues = queues,
+            Err(e) => {
+                event!(Level::ERROR, "Failed to load queues: {}", e);
+            }
         }
+        qm
     }
     pub async fn add_saved_queue(&mut self, name: impl ToString) -> Result<(), String> {
         let queue_read = self.queue.read().await;
@@ -91,20 +98,34 @@ where
     }
     pub async fn clear_queue(&mut self) {
         self.queue.write().await.clear();
-        self.skip().await;
+        let _ = self.skip().await;
     }
-    pub async fn swap(&self, index1: usize, index2: usize) -> Result<(), String> {
+    pub async fn swap(&self, index1: usize, index2: usize) -> Result<(), usize> {
         let queue_len = self.queue.read().await.len();
-        if index1 >= queue_len || index2 >= queue_len {
-            return Err("Index out of bounds".to_string());
+        let index_invalid = |i: usize| i >= queue_len;
+
+        if index_invalid(index1) {
+            return Err(index1);
         }
+        if index_invalid(index2) {
+            return Err(index2);
+        }
+
         self.queue.write().await.swap(index1, index2);
         Ok(())
     }
     pub fn save_queues(&self) {
-        let _ = self.queue_saver.save_queues(self.saved_queues.clone());
+        match self.queue_saver.save_queues(self.saved_queues.clone()) {
+            Ok(_) => (),
+            Err(e) => {
+                event!(Level::ERROR, "Failed to save queues: {}", e);
+            }
+        }
     }
-    pub async fn call_joined(this: QueueEventHandler<QS>, driver: Arc<Mutex<Call>>) -> Result<(), ControlError>{
+    pub async fn call_joined(
+        this: QueueEventHandler<QS>,
+        driver: Arc<Mutex<Call>>,
+    ) -> Result<(), ControlError> {
         let t = this.0.write().await;
         let call = driver.clone();
         t.player.write().await.call_joined(driver);
@@ -127,8 +148,8 @@ where
     pub async fn resume(&self) -> Result<(), ControlError> {
         self.player.write().await.resume()
     }
-    pub async fn skip(&self) {
-        self.remove_current_song(true).await;
+    pub async fn skip(&self) -> Result<Box<dyn Song>, ControlError> {
+        self.remove_current_song(true).await
     }
     pub async fn set_loop(&self, loop_mode: LoopMode) {
         self.player.write().await.loop_mode = loop_mode;
@@ -141,35 +162,35 @@ where
     pub async fn get_current_song(&self) -> Option<CurrentSong> {
         self.player.read().await.get_current_song()
     }
-    async fn remove_current_song(&self, song_skipped: bool) {
+
+    async fn remove_current_song(&self, song_skipped: bool) -> Result<Box<dyn Song>, ControlError> {
         let mut pw = self.player.write().await;
         let current_song = match pw.take_current_song() {
             Ok(song) => song,
             Err(e) => {
                 event!(Level::ERROR, "Failed to remove current song: {}", e);
-                return;
+                return Err(e);
             }
         };
         let loop_mode = &pw.loop_mode;
         match loop_mode {
             LoopMode::Song => {
                 if !song_skipped {
-                    self.queue.write().await.push_front(current_song)
+                    self.queue
+                        .write()
+                        .await
+                        .push_front(current_song.clone_song())
                 }
             }
             LoopMode::Queue => {
-                self.queue.write().await.push_back(current_song);
-            }
-            LoopMode::Repeat(n) => {
-                if n > &1 {
-                    pw.loop_mode = LoopMode::Repeat(n - 1);
-                    self.queue.write().await.push_front(current_song);
-                } else {
-                    pw.loop_mode = LoopMode::None;
-                }
+                self.queue
+                    .write()
+                    .await
+                    .push_back(current_song.clone_song());
             }
             LoopMode::None => {}
         }
+        return Ok(current_song);
     }
     async fn play_next(&self) -> Result<(), ControlError> {
         let song = match self.queue.write().await.pop_front() {
@@ -210,8 +231,8 @@ where
 {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
         let write = self.write().await;
-        write.remove_current_song(false).await;
-        match write.play_next().await{
+        // let _cs = write.remove_current_song(false).await;
+        match write.play_next().await {
             Ok(_) => (),
             Err(e) => {
                 event!(Level::ERROR, "Failed to play next song: {}", e);

@@ -5,6 +5,7 @@ use std::{
     path::PathBuf,
 };
 
+
 use crate::common::SongId;
 
 use super::CachedEntity;
@@ -56,7 +57,7 @@ impl CacheSaver for FileCacheSaver {
     fn load_cache(&self) -> Result<HashMap<SongId, CachedEntity>, CacheSaverError> {
         let file_data = fs::read_to_string(&self.cache_dir.join("cache.json"))
             .map_err(|_| CacheSaverError::FailedToReadFromFile)?;
-        let data =
+        let data: HashMap<String, CachedEntity> =
             serde_json::from_str(&file_data).map_err(|_| CacheSaverError::FailedToParseData)?;
         Ok(data)
     }

@@ -29,6 +29,7 @@ impl FileQueueSaver {
 
 impl QueueSaver for FileQueueSaver {
     fn save_queues(&self, queues: HashMap<String, Vec<SongId>>) -> Result<(), String> {
+        println!("Saving queues to {:?}", &self.saved_queues_path);
         let file = std::fs::File::create(&self.saved_queues_path).map_err(|e| e.to_string())?;
         serde_json::to_writer(file, &queues).map_err(|e| e.to_string())?;
         Ok(())

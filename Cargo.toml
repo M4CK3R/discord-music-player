@@ -15,7 +15,7 @@ rand = "^0.8"
 chrono = "^0.4"
 regex = "^1.10"
 async-trait = "^0.1"
-serenity = "^0.12"
+serenity = { version = "^0.12", features = ["cache", "chrono", "command_attr", "framework", "gateway", "levenshtein", "rustls_backend", "static_assertions", "uwl"], default-features = false }
 tokio = { version = "^1.36", features = [
     "macros",
     "rt-multi-thread",
@@ -26,3 +26,4 @@ youtube_dl = { version = "^0.9", features = ["tokio"] }
 songbird = { version = "^0.4.1", features = ["serenity", "driver"] }
 symphonia = { version = "^0.5", features = ["all"] }
 reqwest = "^0.11"
+poise = "0.6.1"

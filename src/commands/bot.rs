@@ -1,92 +1,43 @@
-use serenity::{
-    framework::standard::{
-        macros::{command, hook},
-        CommandResult,
-    },
-    model::channel::Message,
-    prelude::Context,
-};
-use tracing::{event, Level};
+use std::sync::Arc;
 
-use crate::{
-    commands::{
-        logger::{messages::JOINING_CHANNEL, Logger},
-        utils,
-    },
-    common::DiscordQueueManager,
-};
+use serenity::
+    all::{ChannelId, GuildId}
+;
+use songbird::Songbird;
+use tokio::sync::RwLock;
 
-#[command]
-#[only_in(guilds)]
-#[description = "Pings the bot"]
-#[aliases("pong")]
-pub async fn ping(_ctx: &Context, msg: &Message) -> CommandResult {
-    msg.reply(&_ctx.http, "Pong!").await.log_message()?;
-    Ok(())
-}
+use crate::common::{CommandError, DiscordQueueManager};
 
-#[command]
-#[only_in(guilds)]
-#[description = "Joins the voice channel you are in"]
-#[aliases("connect", "j")]
-pub async fn join(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild = utils::get_guild(ctx, msg).await?;
-    let channel_id = utils::get_channel_id(&guild, msg, &ctx.http).await?;
-    let manager = utils::get_manager(ctx, msg).await?;
+pub async fn join(
+    channel_id: ChannelId,
+    guild_id: GuildId,
+    manager: Arc<Songbird>,
+    queue_manager: Arc<RwLock<DiscordQueueManager>>,
+) -> Result<(), CommandError> {
     let call = manager
-        .join(guild.id, channel_id)
+        .join(guild_id, channel_id)
         .await
-        .log_with_message(JOINING_CHANNEL, msg, &ctx.http)
-        .await?;
-    let data = ctx.data.read().await;
-    let queue_manager = utils::get_queue_manager(guild.id.to_string(), &data, None, None).await?;
-    // queue_manager.write().await.call_joined(call).await;
+        .map_err(|e| CommandError::SongbirdError(e.into()))?;
     match DiscordQueueManager::call_joined(queue_manager.into(), call).await {
-        Ok(_) => (),
-        Err(e) => {
-            event!(Level::ERROR, "Failed to join voice channel: {}", e);
-            let _ = msg
-                .reply(&ctx.http, format!("Failed to join voice channel: {}", e))
-                .await
-                .log_message();
-        }
-    };
-    Ok(())
+        Ok(_) => Ok(()),
+        Err(e) => Err(CommandError::SongbirdError(e.into())),
+    }
 }
 
-#[command]
-#[only_in(guilds)]
-#[description = "Leaves the voice channel"]
-#[aliases("disconnect", "l", "papa", "dobranoc")]
-pub async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild = utils::get_guild(ctx, msg).await?;
-    let data = ctx.data.read().await;
-    let queue_manager = utils::get_queue_manager(guild.id.to_string(), &data, None, None).await?;
+pub async fn leave(
+    queue_manager: Arc<RwLock<DiscordQueueManager>>,
+) -> Result<(), CommandError> {
     let call = queue_manager.write().await.call_left().await;
-
     match call {
         Some(call) => {
-            call.lock().await.leave().await?;
-            msg.reply(&ctx.http, "Left the voice channel")
+            call.lock()
                 .await
-                .log_message()?;
-        }
-        None => {
-            msg.reply(&ctx.http, "Not in a voice channel")
+                .leave()
                 .await
-                .log_message()?;
+                .map_err(|e| CommandError::SongbirdError(e.into()))?;
+            Ok(())
         }
+        None => Err(CommandError::NotInVoiceChannel),
     }
-    Ok(())
 }
 
-#[hook]
-pub async fn unrecognised_command(ctx: &Context, msg: &Message, unrecognised_command_name: &str) {
-    let _ = msg
-        .reply(
-            &ctx,
-            format!("Unrecognised command: {}", unrecognised_command_name),
-        )
-        .await
-        .log_message();
-}

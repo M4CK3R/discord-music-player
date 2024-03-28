@@ -1,5 +1,7 @@
-use std::{fmt::Display, sync::Arc};
+use std::{fmt::Display, str::FromStr, sync::Arc};
 
+use poise::ChoiceParameter;
+use serde::{Deserialize, Serialize};
 use songbird::{
     tracks::{ControlError, TrackHandle},
     Call,
@@ -25,11 +27,10 @@ impl Clone for CurrentSong {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize, ChoiceParameter)]
 pub enum LoopMode {
     Song,
     Queue,
-    Repeat(usize),
     None,
 }
 
@@ -38,8 +39,21 @@ impl Display for LoopMode {
         match self {
             LoopMode::Song => write!(f, "Song"),
             LoopMode::Queue => write!(f, "Queue"),
-            LoopMode::Repeat(n) => write!(f, "Repeat {}", n),
             LoopMode::None => write!(f, "None"),
+        }
+    }
+}
+
+impl FromStr for LoopMode {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_lowercase();
+        match s.as_str() {
+            "none" => Ok(LoopMode::None),
+            "song" => Ok(LoopMode::Song),
+            "queue" => Ok(LoopMode::Queue),
+            _ => Err("Invalid loop mode"),
         }
     }
 }
@@ -97,7 +111,7 @@ impl Player {
     pub async fn play(&mut self, song: Box<dyn Song>) -> Result<(), ControlError> {
         let cs = self.current_song.take();
         if let Some(cs) = cs {
-            cs.track_handle.stop()?;
+            let _ = cs.track_handle.stop();
         }
         let call = match &self.call {
             Some(c) => c,

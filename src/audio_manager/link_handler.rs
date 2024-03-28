@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 
 use crate::{
     cache_manager::{cache_saver::CacheSaver, CacheManager, CachedEntity},
-    common::Song,
+    common::{Song, SongId},
 };
 
 use super::songs::YtSong;
@@ -96,19 +96,41 @@ where
         if songs.is_empty() {
             return Err(format!("Could not get song {}", link));
         }
+        let mut handles = vec![];
         for song in &songs {
             if let Some(cached_entity) = self.cache_manager.read().await.get_song(&song.get_id()) {
                 return Ok(self.parse_cached_entity(cached_entity).await);
             }
-            let _handle = tokio::task::spawn(cache_song_and_save(
+            let handle = tokio::task::spawn(cache_song_and_save(
                 song.clone(),
                 self.yt_template.clone(),
                 self.path.clone(),
                 self.cache_manager.clone(),
             ));
+            handles.push(handle);
+        }
+        if songs.len() > 1 {
+            tokio::task::spawn(cache_link::<CS>(
+                link.to_string(),
+                songs.iter().map(|s| s.get_id().clone()).collect(),
+                self.cache_manager.clone(),
+            ));
         }
         Ok(songs.iter().map(|s| s.clone_song()).collect())
     }
+}
+
+async fn cache_link<CS>(
+    link: impl ToString,
+    songs: Vec<SongId>,
+    cache_manager: Arc<RwLock<CacheManager<CS>>>,
+) where
+    CS: CacheSaver + Send + Sync + Clone,
+{
+    cache_manager
+        .write()
+        .await
+        .add_songs(link.to_string(), songs.clone());
 }
 
 async fn cache_song_and_save<CS>(
@@ -148,7 +170,10 @@ async fn test_cache_song_and_save() {
     let tmp = temp_dir();
     let yt_template = format!("{}/%(id)s.%(ext)s", tmp.to_str().unwrap());
     cache_song_and_save(song, yt_template, tmp, cache_manager.clone()).await;
-    assert!(cache_manager.read().await._is_cached(&"test_id".to_string()));
+    assert!(cache_manager
+        .read()
+        .await
+        ._is_cached(&"test_id".to_string()));
 }
 
 pub struct NullLinkHandler {}
