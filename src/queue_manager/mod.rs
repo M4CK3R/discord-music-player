@@ -193,6 +193,9 @@ where
         return Ok(current_song);
     }
     async fn play_next(&self) -> Result<(), ControlError> {
+        if let Err(e) = self.remove_current_song(false).await {
+            event!(Level::ERROR, "Failed to remove current song: {}", e);
+        }
         let song = match self.queue.write().await.pop_front() {
             Some(song) => song,
             None => return Ok(()),

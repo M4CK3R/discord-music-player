@@ -1,4 +1,8 @@
-/target
-/.env*
-/audio
-/.vscode
+target
+.env*
+audio
+.vscode
+.cargo
+.direnv
+rust-toolchain.toml
+cache

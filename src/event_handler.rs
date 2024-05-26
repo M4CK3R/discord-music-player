@@ -18,7 +18,7 @@ pub(crate) struct Handler;
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
+        tracing::event!(Level::INFO, "{} is connected!", ready.user.name);
     }
     async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: Option<bool>) {
         let guild_id = guild.id;
@@ -26,6 +26,7 @@ impl EventHandler for Handler {
         let queue_manager_map = data
             .get::<DiscordQueueManager>()
             .expect("Queue manager not found"); //.write().await;
+        tracing::event!(Level::INFO, "Guild created: {}", guild_id);
         if !queue_manager_map.read().await.contains_key(&guild_id) {
             tracing::event!(Level::INFO, "Creating queue manager for guild {}", guild_id);
             let config = data.get::<Config>().expect("Config not found");
@@ -43,6 +44,7 @@ impl EventHandler for Handler {
                 guild_id,
                 Arc::new(RwLock::new(DiscordQueueManager::new(queue_saver))),
             );
+            tracing::event!(Level::INFO, "Queue manager created for guild {}", guild_id);
         }
     }
 }
