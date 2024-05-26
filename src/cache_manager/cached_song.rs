@@ -15,8 +15,19 @@ pub struct CachedSong {
     pub duration: Option<u64>,
 }
 
-pub trait CashableSong: Song + Into<CachedSong> {
-    fn get_path(&self) -> &PathBuf;
+#[async_trait]
+pub trait CacheableSong: Song {
+    type E;
+    fn get_path(&self) -> PathBuf;
+    async fn cache_song(&self) -> Result<CachedSong, Self::E> {
+        Ok(CachedSong {
+            id: self.get_id().clone(),
+            path: self.get_path().clone(),
+            title: self.title().clone(),
+            artist: self.artist().clone(),
+            duration: self.duration(),
+        })
+    }
 }
 
 #[async_trait]
@@ -49,8 +60,9 @@ impl Song for CachedSong {
     }
 }
 
-impl CashableSong for CachedSong {
-    fn get_path(&self) -> &PathBuf {
-        &self.path
+impl CacheableSong for CachedSong {
+    type E = ();
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
     }
 }

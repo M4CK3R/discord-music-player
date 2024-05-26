@@ -4,13 +4,22 @@ use async_trait::async_trait;
 use reqwest::Client;
 use songbird::input::Input;
 use tokio::sync::RwLock;
-use tracing::event;
 use youtube_dl::{SingleVideo, YoutubeDl};
 
 use crate::{
-    cache_manager::{cache_saver::CacheSaver, CacheManager, CachedEntity, CachedSong},
+    cache_manager::{
+        cache_saver::CacheSaver, CacheManager, CacheableSong, CachedEntity, CachedSong,
+    },
     common::{Song, SongId},
 };
+
+pub enum YtResult<CS>
+where
+    CS: CacheSaver + Clone,
+{
+    Song(YtSong<CS>),
+    Playlist(Vec<YtSong<CS>>),
+}
 
 #[derive(Clone)]
 pub struct YtSong<CS>
@@ -25,107 +34,49 @@ where
     yt_id: String,
     client: reqwest::Client,
     cache_manager: Arc<RwLock<CacheManager<CS>>>,
+    output_template: String,
+    base_path: PathBuf,
+}
+
+#[derive(Debug)]
+pub enum YtSongError {
+    YoutubeDlError(youtube_dl::Error),
+    UnknownError,
+    LinkNotFound,
+}
+
+impl From<youtube_dl::Error> for YtSongError {
+    fn from(e: youtube_dl::Error) -> Self {
+        YtSongError::YoutubeDlError(e)
+    }
 }
 
 impl<CS> YtSong<CS>
 where
     CS: CacheSaver + Clone,
 {
-    #[cfg(test)]
-    pub fn create(
-        id: &str,
-        title: &str,
-        artist: &str,
-        duration: Option<u64>,
-        cache_manager: Arc<RwLock<CacheManager<CS>>>,
-    ) -> YtSong<CS> {
-        YtSong {
-            id: id.to_string(),
-            title: title.to_string(),
-            artist: artist.to_string(),
-            duration,
-            extension: Some("mp3".to_string()),
-            yt_id: "test".to_string(),
-            client: reqwest::Client::new(),
-            cache_manager: cache_manager,
-        }
-    }
-
-    // TODO change to Result
     pub async fn new(
-        link: impl ToString,
-        client: Client,
+        link: &str,
+        client: reqwest::Client,
         cache_manager: Arc<RwLock<CacheManager<CS>>>,
-    ) -> Vec<YtSong<CS>> {
+        output_template: String,
+        base_path: PathBuf,
+    ) -> Result<YtResult<CS>, YtSongError> {
         let yt_result = YoutubeDl::new(link.to_string())
             .flat_playlist(true)
             .run_async()
-            .await;
-        let yt_result = match yt_result {
-            Ok(yt_result) => yt_result,
-            Err(e) => {
-                event!(tracing::Level::ERROR, "Error getting song: {}", e);
-                return vec![];
-            }
-        };
+            .await?;
+
         if let Some(sv) = yt_result.clone().into_single_video() {
-            let yt_song = YtSong::from_sv(sv, client, cache_manager);
-            match yt_song {
-                Ok(s) => return vec![s],
-                Err(e) => {
-                    event!(tracing::Level::ERROR, "Error getting song: {}", e);
-                    return vec![];
-                }
-            }
+            return Self::from_sv(sv, client, cache_manager, output_template, base_path);
         }
+
         if let Some(pl) = yt_result.into_playlist() {
-            let entries = match pl.entries {
-                Some(entries) => entries,
-                None => return vec![],
-            };
-
-            return entries
-                .into_iter()
-                .map(|sv| YtSong::from_sv(sv, client.clone(), cache_manager.clone()))
-                .filter_map(|s| match s {
-                    Ok(s) => Some(s),
-                    Err(e) => {
-                        event!(tracing::Level::ERROR, "Error getting song: {}", e);
-                        None
-                    }
-                })
-                .collect();
+            return Self::from_pl(pl, client, cache_manager, output_template, base_path);
         }
-        vec![]
-    }
 
-    pub async fn cache_song(
-        self,
-        output_template: String,
-        base_path: PathBuf,
-    ) -> Result<CachedSong, String> {
-        YoutubeDl::new(&self.id)
-            .output_template(output_template)
-            .format("ba")
-            .download_to_async("./")
-            .await
-            .map_err(|e| e.to_string())?;
-        let e = match &self.extension {
-            Some(e) => e.clone(),
-            None => self
-                .find_cached_song_extension(&base_path)
-                .await
-                .ok_or("No extension")?,
-        };
-        Ok(CachedSong {
-            id: self.id.clone(),
-            title: self.title.clone(),
-            artist: self.artist.clone(),
-            duration: self.duration.clone(),
-            path: base_path.join(format!("{}.{}", self.yt_id, e)),
-        })
+        return Err(YtSongError::UnknownError);
     }
-
     async fn find_cached_song_extension(&self, base_path: &PathBuf) -> Option<String> {
         let id = self.yt_id.clone();
         let mut dir_contents = match tokio::fs::read_dir(base_path).await {
@@ -154,21 +105,57 @@ where
     }
 
     fn from_sv(
-        value: SingleVideo,
+        sv: SingleVideo,
         client: Client,
         cache_manager: Arc<RwLock<CacheManager<CS>>>,
-    ) -> Result<YtSong<CS>, String> {
-        Ok(YtSong {
-            id: get_link(&value).ok_or("No link found")?,
+        output_template: String,
+        base_path: PathBuf,
+    ) -> Result<YtResult<CS>, YtSongError> {
+        let value = sv;
+        Ok(YtResult::Song(YtSong {
+            id: get_link(&value)?,
             title: get_title(&value),
             artist: get_artist(&value),
             duration: get_duration(&value),
-            // link: get_link(&value),
             extension: get_extension(&value),
             yt_id: value.id,
             client,
             cache_manager: cache_manager,
-        })
+            base_path,
+            output_template,
+        }))
+    }
+
+    fn from_pl(
+        pl: youtube_dl::Playlist,
+        client: Client,
+        cache_manager: Arc<RwLock<CacheManager<CS>>>,
+        output_template: String,
+        base_path: PathBuf,
+    ) -> Result<YtResult<CS>, YtSongError> {
+        let entries = pl.entries.ok_or(YtSongError::UnknownError)?;
+        let songs: Vec<_> = entries
+            .into_iter()
+            .filter_map(|sv| {
+                Self::from_sv(
+                    sv,
+                    client.clone(),
+                    cache_manager.clone(),
+                    output_template.clone(),
+                    base_path.clone(),
+                )
+                .ok()
+                .map(|s| {
+                    if let YtResult::Song(s) = s {
+                        s
+                    } else {
+                        unreachable!()
+                    }
+                })
+            })
+            .collect();
+
+        Ok(YtResult::Playlist(songs))
     }
 }
 
@@ -198,7 +185,8 @@ where
     }
 
     async fn get_input(&self) -> Input {
-        if let Some(CachedEntity::Song(song)) = self.cache_manager.read().await.get_song(&self.id) {
+        if let Some(CachedEntity::Song(song)) = self.cache_manager.read().await.get_entry(&self.id)
+        {
             return song.get_input().await;
         }
         let p = self.id.clone();
@@ -235,17 +223,55 @@ fn get_duration(sv: &SingleVideo) -> Option<u64> {
         None => None,
     }
 }
-fn get_link(value: &SingleVideo) -> Option<String> {
+fn get_link(value: &SingleVideo) -> Result<String, YtSongError> {
     match &value.url {
-        Some(url) => return Some(url.clone()),
+        Some(url) => return Ok(url.clone()),
         None => (),
     }
     match &value.webpage_url {
-        Some(url) => return Some(url.clone()),
+        Some(url) => return Ok(url.clone()),
         None => (),
     }
-    None
+    Err(YtSongError::LinkNotFound)
 }
 fn get_extension(value: &SingleVideo) -> Option<String> {
     value.ext.clone()
+}
+
+#[async_trait]
+impl<CS> CacheableSong for YtSong<CS>
+where
+    CS: CacheSaver + Clone + Send + Sync + 'static,
+{
+    type E = String;
+    fn get_path(&self) -> PathBuf {
+        let e = match &self.extension {
+            Some(e) => e.clone(),
+            None => "mp3".to_string(),
+        };
+        self.base_path.join(format!("{}.{}", self.yt_id, e))
+    }
+
+    async fn cache_song(&self) -> Result<CachedSong, Self::E> {
+        YoutubeDl::new(&self.id)
+            .output_template(&self.output_template)
+            .format("ba")
+            .download_to_async("./")
+            .await
+            .map_err(|e| e.to_string())?;
+        let e = match &self.extension {
+            Some(e) => e.clone(),
+            None => self
+                .find_cached_song_extension(&self.base_path)
+                .await
+                .ok_or("No extension")?,
+        };
+        Ok(CachedSong {
+            id: self.id.clone(),
+            title: self.title.clone(),
+            artist: self.artist.clone(),
+            duration: self.duration.clone(),
+            path: self.base_path.join(format!("{}.{}", self.yt_id, e)),
+        })
+    }
 }

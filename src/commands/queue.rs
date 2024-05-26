@@ -27,10 +27,16 @@ fn get_progress_bar(
     let fill_amount = (duration_played as f32 / song_duration as f32 * progress_bar_length as f32)
         .round() as usize;
 
+    let empty_amount = if fill_amount > progress_bar_length {
+        0
+    } else {
+        progress_bar_length - fill_amount
+    };
+
     format!(
         "[{}{}]",
         progress_bar_fill.repeat(fill_amount),
-        progress_bar_empty.repeat(progress_bar_length - fill_amount)
+        progress_bar_empty.repeat(empty_amount)
     )
 }
 
@@ -60,7 +66,14 @@ pub async fn show(
         .num_seconds() as u64;
     let song_duration = current_song.song.duration();
     let timestamp = match song_duration {
-        Some(duration) => Utc::now() + Duration::seconds((duration - elapsed) as i64),
+        Some(duration) => {
+            let d = if elapsed > duration as u64 {
+                Duration::seconds(0)
+            } else {
+                Duration::seconds((duration - elapsed) as i64)
+            };
+            Utc::now() + d
+        }
         None => Utc::now(),
     };
 
