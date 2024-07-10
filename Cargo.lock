@@ -2284,9 +2284,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stream_lib"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7099f9ae888e38cab81c72a440e7ddb28ca0c423fd58ffb2caa5348138ed8ad1"
+checksum = "fa3f10eb5a7054e17abf61d310e4e29108187a847591c63c4c79b6a74898a5a7"
 dependencies = [
  "bytes",
  "futures-core",
