@@ -3281,9 +3281,9 @@ checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
 
 [[package]]
 name = "typesize"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "549e54551d85ba6718a95333d9bc4367f69793d7aba638de30f8d25a1f554a1d"
+checksum = "20304d891be0766f52123746c721d1190b953e874f9eccf29067a64c1a0ae16c"
 dependencies = [
  "chrono",
  "dashmap",
@@ -3299,9 +3299,9 @@ dependencies = [
 
 [[package]]
 name = "typesize-derive"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd9fc0ad9e03a2b0c2e2a0eafaecccef2121829e1ab6ce9c9d790e6c6766bd1c"
+checksum = "536b6812192bda8551cfa0e52524e328c6a951b48e66529ee4522d6c721243d6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3583,7 +3583,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
