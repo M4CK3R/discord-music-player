@@ -16,7 +16,7 @@ chrono = "^0.4"
 regex = "^1.11"
 async-trait = "^0.1"
 serenity = { version = "^0.12", features = ["cache", "chrono", "command_attr", "framework", "gateway", "levenshtein", "rustls_backend", "static_assertions", "uwl"], default-features = false }
-tokio = { version = "^1.44", features = [
+tokio = { version = "^1.45", features = [
     "macros",
     "rt-multi-thread",
     "signal",
